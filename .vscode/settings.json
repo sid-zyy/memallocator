@@ -1,0 +1,6 @@
+{
+    "files.associations": {
+        "memallocator.h": "c",
+        "time.h": "c"
+    }
+}
