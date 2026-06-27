@@ -1,0 +1,11 @@
+# compiled outputs
+test_allocator
+*.o
+*.out
+
+# editor
+.vscode/
+.idea/
+
+# macOS
+.DS_Store
