@@ -1,5 +1,4 @@
 #include <sys/mman.h>//used for mmap
-#include <fcntl.h>
 #include <unistd.h>
 #include <stdio.h>
 #include "memallocator.h"
@@ -11,12 +10,12 @@ struct block{
     int mmap;//checking if block is mmap or sbrk allocated
 };
 
-const size_t BLOCK_SIZE = sizeof(struct block);
-const size_t mmapthreshold = 1024 * 128;//above this threshold mmap used instead of sbrk
-struct block *free_list = NULL;//header of LL
+static const size_t BLOCK_SIZE = sizeof(struct block);
+static const size_t mmapthreshold = 1024 * 128;//above this threshold mmap used instead of sbrk
+static struct block *free_list = NULL;//header of LL
 
 
-struct block* request_space(struct block* last, size_t size){
+static struct block* request_space(struct block* last, size_t size){
     void *request = sbrk(size+BLOCK_SIZE);//asking OS for memory
     if(request == (void*)-1){//sbrk returns void*-1 on failure
         return NULL;
@@ -32,7 +31,7 @@ struct block* request_space(struct block* last, size_t size){
     return newblock;
 }
 
-struct block* find_free(struct block **last, size_t size){//we pass last to 
+static struct block* find_free(struct block **last, size_t size){//we pass last to track the final node so we can append after it if no free block is found
     struct block* current = free_list;
 
     while(current && !(current->free && current->size >= size)){
@@ -42,7 +41,7 @@ struct block* find_free(struct block **last, size_t size){//we pass last to
     return current;//returns NULL if there is no pre existing free memory else returns block with required memory or above
 }
 
-void split_block(struct block *newblock,size_t size){
+static void split_block(struct block *newblock,size_t size){
     if(newblock->size >= size+BLOCK_SIZE+sizeof(void*)){
         struct block* newblock2 = (struct block*)((char*)(newblock+1)+size);//calculates where newblock2 should begin
         newblock2->size = newblock->size - size - BLOCK_SIZE;
@@ -51,24 +50,28 @@ void split_block(struct block *newblock,size_t size){
         newblock2->mmap = 0;
 
         newblock->size = size;
-        newblock->next =  newblock2;
+        newblock->next = newblock2;
     }
 }
 
-void coalesce(struct block* block){//merging this free block with adjacent free blocks to combine into a larger block
+static void coalesce(struct block* block){//merging this free block with adjacent free blocks to combine into a larger block
+    // forward merge: absorb next block if it is free
     if(block->next && block->next->free){
         block->size += block->next->size + BLOCK_SIZE;
         block->next = block->next->next;
     }
 
+    // backward merge: walk from free_list to find the predecessor of block
+    // bug fix: original checked current->next->free instead of current->free,
+    // and crashed with a null dereference when block == free_list
     struct block* current = free_list;
     while(current && current->next != block){
         current = current->next;
     }
 
-    if(current && current->next->free){
+    if(current && current->free){//if predecessor exists and is free, absorb block into it
         current->size += block->size + BLOCK_SIZE;
-        current->next =  block->next;
+        current->next = block->next;
     }
 }
 
@@ -86,16 +89,16 @@ void *mymalloc(size_t size){
     //ex : size is 12 bytes we add 7 bytes = 19 bytes then use & function with complement of 7 we get 16
 
     if(size >= mmapthreshold){//case of mmap being used
-        void *ptr =  mmap(NULL,size + BLOCK_SIZE,PROT_READ|PROT_WRITE, MAP_PRIVATE|MAP_ANONYMOUS, -1,0);
+        void *ptr = mmap(NULL,size + BLOCK_SIZE,PROT_READ|PROT_WRITE, MAP_PRIVATE|MAP_ANONYMOUS, -1,0);
         //NULL means kernel chooses any suitable virtual address
         //length of the memory region (size asked + internal block header)
-        //PROT read and write means mmemory can be both read and written
-        //MAP_ANONOYMOUS means dont load a file into memory rather just give me the raw memory
+        //PROT read and write means memory can be both read and written
+        //MAP_ANONYMOUS means dont load a file into memory rather just give me the raw memory
         //MAP_PRIVATE the mapping is private to this process
         if(ptr == MAP_FAILED){
             return NULL;
         }
-        newblock = (struct block*)ptr; //intitializing values of header of memory block
+        newblock = (struct block*)ptr; //initializing values of header of memory block
         newblock->size = size;
         newblock->next = NULL;
         newblock->free = 0;
@@ -140,4 +143,3 @@ void myfree(void* ptr){
         coalesce(block);
     }
 }
-
